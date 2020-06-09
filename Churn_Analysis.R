@@ -6,10 +6,22 @@
 # 
 # 
 
-# Packages
+### Packages
 library(ROSE)
 
-# Readigng in Data
+### Preliminary Functions
+undersample_ds <- function(x, classCol, nsamples_class){
+  for (i in 1:length(unique(x[, classCol]))){
+    class.i <- unique(x[, classCol])[i]
+    if((sum(x[, classCol] == class.i) - nsamples_class) != 0){
+      x <- x[-sample(which(x[, classCol] == class.i), 
+                     sum(x[, classCol] == class.i) - nsamples_class), ]
+    }
+  }
+  return(x)
+}
+
+### Readigng in Data
 data  <- read.csv("C:/Users/jeanp/OneDrive/Documents/GitHub/Telco_Churn_Analysis/WA_Fn-UseC_-Telco-Customer-Churn.csv")
 summary(data)
 str(data)
@@ -41,15 +53,14 @@ table(data$Churn)
 
 
 # Based on the Bar Chart given above, the data is not balanced. Thus, it will need to be balanced:
-
-test <- data[, -20]
-ovun.sample(formula, data, method="both", N, p=0.5, 
-            subset=options("subset")$subset,
-            na.action=options("na.action")$na.action, seed)
+test <- undersample_ds(data, "Churn", 500)
+table(test$Churn)
 
 # creating and testing a logistic model
-temp0 <- glm(Churn ~ MonthlyCharges, data = test, family = binomial(link = "logit"))
+temp0 <- glm(Churn ~ ., data = test, family = binomial(link = "logit"))
 summary(temp0)
 prob <- predict.glm(temp0, type = "response")
 pred <- ifelse(prob > .8, "Yes", "No")
 table(pred, data$Churn)
+
+
