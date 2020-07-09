@@ -22,6 +22,9 @@ library(rattle)
 library(rpart.plot)
 library(caTools)
 library(pROC)
+library(bnclassify)
+library(HiDimDA)
+library(broom)
 
 ### Preliminary Functions
 undersample_ds <- function(x, classCol, nsamples_class){
@@ -60,8 +63,12 @@ churn$Churn <- relevel(churn$Churn, ref = "No")
 for(i in 2:20){
   temp0 <- names(churn)
   if(is.factor(churn[,i]) == TRUE){
-    plot(churn[,i], main = temp0[i])
-    print(table(churn[,i]))
+    gg_plot  <- ggplot(churn, aes(churn[,i], fill = Churn)) +
+      geom_bar(position = position_dodge()) +
+      ggtitle(temp0[i]) +
+      xlab(temp0[i]) +
+      coord_flip()
+    print(gg_plot)
   }
 }
 
@@ -127,7 +134,6 @@ set.seed(1)
 train_id <- sample(1:nrow(churn),nrow(churn)*.8 ,replace=FALSE)
 traind <- churn[train_id, ]
 testd <- churn[-train_id, ]
-plot(traind$Churn)
 
 
 # creating model weights to deal with imbalanced response data
@@ -151,9 +157,10 @@ Boostlogit_model <- train(Churn ~ Contract + InternetService + tenure + PaymentM
                           trControl = ctrl)
 
 prob <- predict.train(Baggedlogit_model, newdata = testd,type = "prob")
-pred <- ifelse(prob[,2] > .7, "Yes", "No")
+pred <- ifelse(prob[,2] > .6, "Yes", "No")
 table(pred, testd$Churn)
 pred_f <- as.factor(pred)
+pred_f <- relevel(pred_f, ref = "Yes")
 confusionMatrix(pred_f, testd$Churn)
 
 # Recieving Operating Characteristics for CART (Bagged)
@@ -272,7 +279,6 @@ gbm_model_w <- train(Churn ~ Contract + tenure + PaymentMethod2 + PaperlessBilli
 prob <- predict.train(gbm_model_w, newdata = testd, type = "prob")
 pred_f <- ifelse(prob[,2] > .229, "Yes", "No")
 table(pred_f, testd$Churn)
-
 pred_f <- as.factor(pred_f)
 confusionMatrix(pred_f, testd$Churn)
 
@@ -286,3 +292,146 @@ plot(roc, colorize = T, lwd = 2)
 abline(a = 0, b = 1)
 auc.tmp <- performance(pred,"auc")
 auc <- as.numeric(auc.tmp@y.values)
+
+
+
+#########################################################################################
+# Linear Discriminant Analysis
+LDA <- train(Churn ~ Contract + tenure + PaymentMethod2 + PaperlessBilling + 
+                       OnlineSecurity + streaming + TechSupport + PhoneService + 
+                       MonthlyCharges + OnlineBackup + SeniorCitizen + DeviceProtection + 
+                       Dependents + MultipleLines,
+                     data = traind,
+                     method = "lda",
+                     weights = model_weights,
+                     metric = "ROC",
+                     trControl = ctrl)
+
+# Reciever Operating Characteristics for Gradient Boosted Model
+prob <- predict.train(LDA, newdata = testd, type = "prob")
+pred_f <- ifelse(prob[,2] > .55, "Yes", "No")
+pred_f <- as.factor(pred_f)
+confusionMatrix(pred_f, testd$Churn)
+
+# Reciever Operating Characteristics for Weighted Gradient Boosted Model
+pred = prediction(prob[,2], testd$Churn)
+perf = performance(pred, "acc")
+plot(perf)
+
+roc = performance(pred,"tpr","fpr")
+plot(roc, colorize = T, lwd = 2)
+abline(a = 0, b = 1)
+auc.tmp <- performance(pred,"auc")
+auc <- as.numeric(auc.tmp@y.values)
+
+
+
+
+#########################################################################################
+#################              Predictive Modeling Part II              #################
+#########################################################################################
+
+#########################################################################################
+temp <- churn[which(churn$Churn == "Yes"),]
+temp1 <- churn[which(churn$Churn == "No"),]
+train_us <- rbind(temp[sample(1:nrow(temp), nrow(temp)*.8, replace = FALSE),],
+             temp1[sample(1:nrow(temp1), nrow(temp)*.8, replace = FALSE),])
+test_us <- rbind(temp[-sample(1:nrow(temp), nrow(temp)*.8, replace = FALSE),],
+             temp1[-sample(1:nrow(temp1), nrow(temp)*.8, replace = FALSE),])
+test_us_c <- rbind(temp[-sample(1:nrow(temp), nrow(temp)*.8, replace = FALSE),],
+                 temp1[-sample(1:nrow(temp1), 4063, replace = FALSE),])
+nrow(test_us_c)
+#########################################################################################
+# Linear Discriminant Analysis
+LDA_us <- train(Churn ~ Contract + tenure + PaymentMethod2 + PaperlessBilling + 
+               OnlineSecurity + streaming + TechSupport + PhoneService + 
+               MonthlyCharges + OnlineBackup + SeniorCitizen + DeviceProtection + 
+               Dependents + MultipleLines,
+             data = train_us,
+             method = "lda",
+             metric = "ROC",
+             trControl = ctrl)
+
+# Reciever Operating Characteristics for Gradient Boosted Model
+prob <- predict.train(LDA_us, newdata = test_us, type = "prob")
+pred_f <- ifelse(prob[,2] > .6, "Yes", "No")
+table(pred_f, test_us$Churn)
+pred_f <- as.factor(pred_f)
+confusionMatrix(pred_f, test_us$Churn)
+
+# Reciever Operating Characteristics for Weighted Gradient Boosted Model
+pred = prediction(prob[,2], test_us$Churn)
+perf = performance(pred, "acc")
+plot(perf)
+
+roc = performance(pred,"tpr","fpr")
+plot(roc, colorize = T, lwd = 2)
+abline(a = 0, b = 1)
+auc.tmp <- performance(pred,"auc")
+auc <- as.numeric(auc.tmp@y.values)
+
+#########################################################################################
+# GBM
+gbm_model_us <- train(Churn ~ Contract + tenure + PaymentMethod2 + PaperlessBilling + 
+                       OnlineSecurity + streaming + TechSupport + PhoneService + 
+                       MonthlyCharges + OnlineBackup + SeniorCitizen + DeviceProtection + 
+                       Dependents + MultipleLines,
+                     data = train_us,
+                     method = "gbm",
+                     verbose = FALSE,
+                     metric = "ROC",
+                     trControl = ctrl)
+
+
+# Reciever Operating Characteristics for Gradient Boosted Model
+prob <- predict.train(gbm_model_us, newdata = test_us_c, type = "prob")
+pred_f <- ifelse(prob[,2] > .6, "Yes", "No")
+table(pred_f, test_us_c$Churn)
+
+pred_f <- as.factor(pred_f)
+confusionMatrix(pred_f, test_us_c$Churn)
+
+# Reciever Operating Characteristics for Weighted Gradient Boosted Model
+pred = prediction(prob[,2], test_us_c$Churn)
+perf = performance(pred, "acc")
+plot(perf)
+
+roc = performance(pred,"tpr","fpr")
+plot(roc, colorize = T, lwd = 2)
+abline(a = 0, b = 1)
+auc.tmp <- performance(pred,"auc")
+auc <- as.numeric(auc.tmp@y.values)
+
+
+
+#########################################################################################
+# Random Forrest
+rf_model_us <- train(Churn ~ Contract + tenure + PaymentMethod2 + PaperlessBilling + 
+                    OnlineSecurity + streaming + TechSupport + PhoneService + 
+                    MonthlyCharges + OnlineBackup + SeniorCitizen + DeviceProtection + 
+                    Dependents + MultipleLines,
+                  data = train_us,
+                  method = "rf",
+                  metric = "ROC",
+                  verbose = FALSE,
+                  trControl = ctrl)
+
+prob <- predict.train(rf_model_us, newdata = test_us, type = "prob")
+pred <- ifelse(prob[,2] > .5, "Yes", "No")
+table(pred, test_us$Churn)
+pred_f <- as.factor(pred)
+confusionMatrix(pred_f, test_us$Churn)
+
+# Recieving Operating Characteristics for Random Forrest
+pred = prediction(prob[,2], test_us$Churn)
+perf = performance(pred, "acc")
+plot(perf)
+
+roc = performance(pred,"tpr","fpr")
+plot(roc, colorize = T, lwd = 2)
+abline(a = 0, b = 1)
+auc.tmp <- performance(pred,"auc")
+auc <- as.numeric(auc.tmp@y.values)
+
+
+
